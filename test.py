@@ -8,10 +8,9 @@ import os
 import json
 
 BUCKET_NAME = 'avpbucket'
-FILE_TO_UPLOAD = 'file.txt'
+FILE_TO_UPLOAD = '/tmp/file.txt'
 
 def create_file_if_not_exists(file_path):
-    """Create a file if it does not already exist."""
     if not os.path.isfile(file_path):
         with open(file_path, 'w') as f:
             f.write('This is a test file.') 
@@ -37,10 +36,8 @@ def find_files_with_extension(s3_client, bucket_name, prefix=''):
     return None
 
 def check_bucket_acl(s3_client, bucket_name):
-    """Check the ACL of the bucket."""
     try:
         acl = s3_client.get_bucket_acl(Bucket=bucket_name)
-        #print(f"Bucket ACL for '{bucket_name}': {acl}")
         return True
     except ClientError as e:
         return False
@@ -63,7 +60,7 @@ def s3_operations(bucket_name, file_to_upload):
 
         if directory and not os.path.exists(directory):
             os.makedirs(directory)
-        
+
         try:
             s3_client.download_file(bucket_name, file_key, local_file_path)
             results['file download'] = "Positive"
@@ -76,8 +73,16 @@ def s3_operations(bucket_name, file_to_upload):
     except ClientError as e:
         results['file upload'] = "Negative" if e.response['Error']['Code'] == 'AccessDenied' else "Unknown error"
     except S3UploadFailedError as e:
-        results['file upload'] = "Negative"  # Set to Negative when upload fails
+        results['file upload'] = "Negative" 
 
-    print(json.dumps(results, indent=2))
+    return {
+        'statusCode': 200,
+        'body': json.dumps(results),
+        'headers': {
+            'Content-Type': 'application/json'
+        },
+    }
 
-s3_operations(BUCKET_NAME, FILE_TO_UPLOAD)
+def lambda_handler(event, context):
+    response = s3_operations(BUCKET_NAME, FILE_TO_UPLOAD)
+    return response
