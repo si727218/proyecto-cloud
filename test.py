@@ -7,7 +7,7 @@ from boto3.exceptions import S3UploadFailedError
 import os
 import json
 
-BUCKET_NAME = 'custtraining'
+BUCKET_NAME = 'avpbucket'
 FILE_TO_UPLOAD = 'file.txt'
 
 def create_file_if_not_exists(file_path):
@@ -18,17 +18,22 @@ def create_file_if_not_exists(file_path):
 
 def find_files_with_extension(s3_client, bucket_name, prefix=''):
     paginator = s3_client.get_paginator('list_objects_v2')
-    for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
-        for content in page.get('Contents', []):
-            key = content['Key']
-            if key[-1] != '/':  
-                if '.' in os.path.basename(key):  
-                    return key  
-        for common_prefix in page.get('CommonPrefixes', []):
-            sub_prefix = common_prefix['Prefix']
-            found_file = find_files_with_extension(s3_client, bucket_name, sub_prefix)
-            if found_file:  
-                return found_file
+    try:
+        for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+            for content in page.get('Contents', []):
+                key = content['Key']
+                if key[-1] != '/':  
+                    if '.' in os.path.basename(key):  
+                        return key  
+            for common_prefix in page.get('CommonPrefixes', []):
+                sub_prefix = common_prefix['Prefix']
+                found_file = find_files_with_extension(s3_client, bucket_name, sub_prefix)
+                if found_file:  
+                    return found_file
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'AccessDenied':
+            print(f"Access Denied when listing objects in bucket {bucket_name}")
+        return None
     return None
 
 def check_bucket_acl(s3_client, bucket_name):
@@ -50,14 +55,15 @@ def s3_operations(bucket_name, file_to_upload):
 
     file_key = find_files_with_extension(s3_client, bucket_name)
     results['file listing'] = "Positive" if file_key else "Negative"
+    results['file download'] = "Negative" if not file_key else "Not attempted"
 
-    local_file_path = file_key
-    directory = os.path.dirname(local_file_path)
-
-    if directory and not os.path.exists(directory):
-        os.makedirs(directory)
-    
     if file_key:
+        local_file_path = file_key
+        directory = os.path.dirname(local_file_path)
+
+        if directory and not os.path.exists(directory):
+            os.makedirs(directory)
+        
         try:
             s3_client.download_file(bucket_name, file_key, local_file_path)
             results['file download'] = "Positive"
@@ -66,11 +72,11 @@ def s3_operations(bucket_name, file_to_upload):
     
     try:
         s3_client.upload_file(file_to_upload, bucket_name, 'test_upload_file.txt')
-        results['file upload'] = "Negative"
-    except ClientError as e:
         results['file upload'] = "Positive"
+    except ClientError as e:
+        results['file upload'] = "Negative" if e.response['Error']['Code'] == 'AccessDenied' else "Unknown error"
     except S3UploadFailedError as e:
-        results['file upload'] = "Negative" if "Access Denied" in str(e) else "Positive"
+        results['file upload'] = "Negative"  # Set to Negative when upload fails
 
     print(json.dumps(results, indent=2))
 
